@@ -53,8 +53,8 @@ contract ProductTracking is Ownable, ManufacturerRole, DistributorRole, VendorRo
     }
 
     // Define a modifer that verifies the Caller
-    modifier verifyCaller (address _address) {
-        require(msg.sender == _address, "This account is not the owner of this item");
+    modifier verifyCaller (address payable _address) {
+        require(payable(msg.sender) == _address, "This account is not the owner of this item"); //NEW CHANGE. address is now address payable, and msg.sender is casted as payable
         _;
     }
 
@@ -76,24 +76,48 @@ contract ProductTracking is Ownable, ManufacturerRole, DistributorRole, VendorRo
         _;
     }
 
-    // Define a function 'manufactureProduct' that allows a farmer to mark an item 'Manufactured'
+    // Define a modifier that checks if an item.state of a upc is DistRecieved
+    modifier distRecieved(uint _upc) {
+        require(products[_upc].currentStatus == State.DistRecieved, "The Item is not in DistRecieved state!");
+        _;
+    }
+
+    // Define a modifier that checks if an item.state of a upc is InTransit
+    modifier inTransit(uint _upc) {
+        require(products[_upc].currentStatus == State.InTransit, "The Item is not in InTransit state!");
+        _;
+    }
+
+    // Define a modifier that checks if an item.state of a upc is VendorRecieved
+    modifier vendorRecieved(uint _upc) {
+        require(products[_upc].currentStatus == State.VendorRecieved, "The Item is not in VendorRecieved state!");
+        _;
+    }
+
+    // Define a modifier that checks if an item.state of a upc is Purchased
+    modifier purchased(uint _upc) {
+        require(products[_upc].currentStatus == State.Purchased, "The Item is not in Purchased state!");
+        _;
+    }
+
+    // Define a function 'manufactureProduct' that allows a manufacturer to mark an item 'Manufactured'
     function manufactureProduct(
     uint _upc,
     string memory name,
     address payable _originManufacturerID) public
-
     onlyManufacturer
     {
         // Add the new item as part of Harvest
         Product memory newItem;
         newItem.ownerID = _originManufacturerID;
+        newItem.manufacturerID = _originManufacturerID; //NEW ADDITION
         newItem.productID = _upc;
         newItem.name = name;
 
         productsCount = productsCount + 1;
 
         // Setting state
-        newItem.currentStatus = State.Shipped;
+        newItem.currentStatus = State.Manufactured; //NEW CHANGE. Used to be State.Shipped
 
         // Adding new Item to map
         products[_upc] = newItem;
@@ -101,6 +125,98 @@ contract ProductTracking is Ownable, ManufacturerRole, DistributorRole, VendorRo
         // Emit the appropriate event
         emit Manufactured(_upc);
     }
+
+    // Define a function 'placeOrder' that allows the manufacturer to mark an item 'OrderPlaced'
+    function placeOrder(uint _upc) public
+    onlyManufacturer
+    manufactured(_upc)
+    verifyCaller(products[_upc].manufacturerID)
+    {
+        //Retrieve product
+        Product storage existingItem = products[_upc];
+        //Update state
+        existingItem.currentStatus = State.OrderPlaced;
+        // Emit the appropriate event
+        emit OrderPlaced(_upc);
+    }
+
+    // Define a function 'shipToDistributor' that allows the manufacturer to mark an item 'Shipped'
+    function shipToDistributor(uint _upc) public
+    onlyManufacturer
+    orderPlaced(_upc)
+    verifyCaller(products[_upc].manufacturerID)
+    {
+        //Retrieve product
+        Product storage existingItem = products[_upc];
+        //Update state
+        existingItem.currentStatus = State.Shipped;
+        // Emit the appropriate event
+        emit Shipped(_upc);
+    }
+
+    // Define a function 'recieveAsDistributor' that allows a disributor to mark an item 'DistRecieved'
+    function recieveAsDistributor(uint _upc) public
+    onlyDistributor
+    shipped(_upc)
+    {
+        //Retrieve product and update new owner
+        Product storage existingItem = products[_upc];
+        existingItem.ownerID = payable(msg.sender);
+        existingItem.distributorID = payable(msg.sender);
+        //Update state
+        existingItem.currentStatus = State.DistRecieved;
+        // emit the appropriate event
+        emit DistRecieved(_upc);
+    }
+
+    // Define a function 'shipToVendor' that allows the distributor to mark an item 'InTransit'
+    function shipToVendor(uint _upc) public
+    onlyDistributor
+    distRecieved(_upc)
+    verifyCaller(products[_upc].distributorID)
+    {
+        //Retrieve product
+        Product storage existingItem = products[_upc];
+        //Update state
+        existingItem.currentStatus = State.InTransit;
+        // Emit the appropriate event
+        emit InTransit(_upc);
+    }
+
+    // Define a function 'recieveAsVendor' that allows a disributor to mark an item 'VendorRecieved'
+    function recieveAsVendor(uint _upc) public
+    onlyVendor
+    inTransit(_upc)
+    {
+        //Retrieve product and update new owner
+        Product storage existingItem = products[_upc];
+        existingItem.ownerID = payable(msg.sender);
+        existingItem.vendorID = payable(msg.sender);
+        //Update state
+        existingItem.currentStatus = State.VendorRecieved;
+        // emit the appropriate event
+        emit VendorRecieved(_upc);
+    }
+
+
+    // Define a function 'shipToVendor' that allows the distributor to mark an item 'Purchased'
+    function sellProduct(uint _upc) public
+    onlyVendor
+    vendorRecieved(_upc)
+    verifyCaller(products[_upc].vendorID)
+    {
+        //Retrieve product
+        Product storage existingItem = products[_upc];
+        //Update state
+        existingItem.currentStatus = State.Purchased;
+        // Emit the appropriate event
+        emit Purchased(_upc);
+    }
+    //IMPORTANT, can add 'address payable customerName' to parameters and then set owner id to that of customerName. I didn't do it, because I didn't find it important for the item's history.
+    //But we can easily add it in and make use of that. It is up to everyone to agree on
+    //Just know that without that, the owner role is practically useless
+
+
     
     // function compareStrings (string memory a, string memory b) public view returns (bool) {
     //     return (keccak256(abi.encodePacked((a))) == keccak256(abi.encodePacked((b))));
